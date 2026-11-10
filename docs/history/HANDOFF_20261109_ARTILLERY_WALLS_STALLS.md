@@ -846,7 +846,9 @@ docstring now says so.
 2. **Settled by the page:** guns turning their backs on the field for a target in the city (§28 item 1). The page
    lists it as a feature: "Guns turn all the way round and fire at will, including at enemies inside the city."
 3. Optional: §28 items 2 and 3.
-4. Open: the mod has no public GitHub repo yet (memory `github-one-public-repo-per-mod`).
+4. Done 2026-11-10: the public repo is https://github.com/DerpyNewb/derpy-artillery-on-walls (MIT, first commit
+   `6e7596a`), mirrored by `py tools/sync_artillery_walls_repo.py` into `repos/derpy-artillery-on-walls/`. It carries
+   no CA files: the two `battle_ai` files are rebuilt from the player's `data.pack`, and the GIFs stay out.
 5. **State.**
    - The Workshop folder `workshop/content/1142710/3837212899/` and `Modpacks/` hold `A862` (md5
      `a862bd1007b717a68a4933910f26934f`), backed up beside the logs with `B6FB`. The `data/` copy was removed after the
