@@ -1,0 +1,24 @@
+__pycache__/
+*.pyc
+*.pack
+*.bak*
+
+# CA's files, and anything drawn from the game, are never published. They ship in the .pack only.
+# battle_ai/bai_values_*.txt: CA's AI files with one value changed; tools/gen_artillery_walls.py writes them from
+# your own data.pack.
+battle_ai/
+*.txt
+*.png
+*.gif
+*.mp4
+*.dds
+*.jpg
+*.jpeg
+*.webp
+*.tga
+*.bin
+*.loc
+*.xlsx
+*.json
+*.npz
+*.twui.xml
