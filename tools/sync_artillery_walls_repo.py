@@ -38,7 +38,7 @@ TOOLS = [
     # reading the exe: static scans, moving every address to a new build, Ghidra headless
     "exe_re.py", "exe_migrate.py", "ghidra_decompile.py", "ghidra/DecompileAt.java", "ghidra/DumpImage.java",
     # the import closure of the above
-    "read_vanilla_db.py", "read_pack_index.py", "rpfm_client.py",
+    "read_vanilla_db.py", "read_pack_index.py", "rpfm_client.py", "rpfm_mcp_bridge.py",
     # this file and its copier
     "sync_guilds_repo.py", "sync_artillery_walls_repo.py",
 ]

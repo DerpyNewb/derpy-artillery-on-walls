@@ -28,6 +28,7 @@ all on the same build.
 | What does this function do? (assembly) | `py tools/exe_re.py dis <rva> [n]` / `fn <rva>` | instant |
 | What does this function do? (C) | `py tools/ghidra_decompile.py <rva> [...]` | ~8 s per call |
 | Is it what the game does right now? | memreader Plus probe over the wh3 bridge (section 9) | a battle |
+| Which instruction wrote this address just now, including through a computed pointer the scans cannot match? | x64dbg MCP, a hardware write breakpoint (section 10b) | a pause of the whole game |
 
 `exe_re.py` reads the exe **on disk** with capstone and numpy, read-only, with the game shut or running. The
 on-disk code is byte-identical to the live code (checked 2026-10-16), so it is the safe way to ask. `--selftest`
@@ -87,6 +88,7 @@ Offsets on the model object (the man; for a rider, his mount is a model too, at 
 | `+0xb0` | facing, u16 (0x10000 = full turn) | live |
 | `+0x108` | flags: bit 0x10 reaches the command/action path, bit 8 and bit 4 take other branches (read 0x33 in melee) | live / code |
 | `+0x128` | an object whose `+0x78` check also sends him to the gate (null in every melee frame measured) | live |
+| `+0x13c` / `+0x140` / `+0x144` | per-tick step x, y, z: the update adds each to `+0x88..+0x90` (`exe+314f3e5`, 2026-11-03 exe) | x64dbg write breakpoint, 2026-11-12 |
 | `+0x194/+0x198`, `+0x1e0/+0x1e8` | steering point copies x, z | live |
 | `+0x1e4` | the walk's destination y (read his own height, 654.7, on a siege wall) | live, 2026-10-21 |
 | `+0x278` | current animation slot, u16; valid while `+0x898` is set or `+0x284` is not 0 | live |
@@ -364,6 +366,79 @@ How it works and why:
   a selection, never the whole program.
 - **After a game patch** the project is for the old exe: re-run `--import` (it overwrites), and rename
   `PROJECT` in the wrapper to the new build.
+
+## 10b. x64dbg: which instruction wrote it, live
+
+`exe_re.py stores` and `writes` list every instruction in the exe that writes a field offset, and memreader Plus
+reads the value live. Neither says which of those instructions wrote the value just now, and neither catches a write
+through a computed address that the scans cannot match. A hardware write breakpoint answers both. Installed
+2026-11-12:
+
+- **x64dbg** snapshot 2026.05.27 in `C:\tools\x64dbg` (SHA-256 checked against the GitHub release). Run
+  `C:\tools\x64dbg\x64\x64dbg.exe`; the game is 64-bit, so the 32-bit half is never used.
+- **duty1g's x64dbg-MCP-Server v1.7** (MIT, <https://github.com/duty1g/x64dbg-mcp-server>), the x64 plugin only,
+  in `C:\tools\x64dbg\x64\plugins\`. It starts with x64dbg and serves 80 MCP tools over streamable HTTP on
+  `127.0.0.1:9094`. `C:\tools\x64dbg\x64\mcp_config.json` holds the bind address and a bearer token, and a request
+  without the token gets 401. The `x64dbg` entry in `.mcp.json` carries the same token, so a token rotated in the
+  plugin's dialog (Plugins > x64dbg-MCP Server > Configure) has to be pasted there too. Keep the bind address on
+  `127.0.0.1`: the server can read and write any attached process's memory, over plain HTTP.
+- **The tools exist only while x64dbg is open**, and Claude Code connects MCP servers when a session starts. Open
+  x64dbg first, or open it later and reconnect `x64dbg` from `/mcp`. Only the user can type `/mcp`; without it,
+  `py tools/x64dbg_call.py <Tool> '<json>'` calls the same 80 tools over HTTP with the token from `.mcp.json`
+  (`list` names them). Argument names are the plugin's: `SwitchThread` takes `threadId`, not `tid`.
+
+The recipe, verified 2026-11-12 on a test process (a Python loop writing an int64 into one buffer every 200 ms).
+
+**On `Warhammer3.exe` (2026-11-12, main menu, intro skip + bridge only):** the game runs attached. The bridge kept
+answering, 32 live code bytes at `0x143087380` matched the exe on disk, a hardware **execute** breakpoint on a
+main-thread return address (`0x14134a0c6`, found by scanning the stack, since `GetCallStack` gave one frame, in
+`win32u`) fired in `warhammer3`, and after `detach` the game went on running. One trap: **on attach x64dbg puts a
+breakpoint on the TLS callback of every loaded DLL** (25 here), so the game pauses each time it starts or ends a
+thread. `DeleteAllBreakpoints`, then `run`; it stopped once more at `dinput8`'s callback with the list empty, and a
+second `run` held. Since the same evening `TlsCallbacks` and `TlsCallbacksSystem` are 0 in
+`C:\tools\x64dbg\x64\x64dbg.ini` (Options > Preferences > Events), and the next attach did not stop on them.
+
+**In a battle (2026-11-12, practice battle, memreader Plus and Third-Person Battles loaded, everything held and
+invincible but one enemy general):** attached in the Deployed phase, two hardware **write** breakpoints, each caught
+first time on worker thread #9 (the main thread is #0):
+
+- A spearman's x (`man+0x88`), with no order given: `movss [rbx+0x88], xmm0` at `exe+314f3f5`, in `x += [rbx+0x13c]`,
+  then y from `+0x140` and z from `+0x144`: **a per-tick step at `+0x13c..+0x144`** (0 when he stands).
+- The general's hit points (`man+0xb1c`), once the swordsmen reached him: the leaf at `exe+3108b34`
+  (`hp = n <= hp ? hp - n : 0`, rcx = man + `0xb18`, edx = the damage, 23 here, 4068 -> 4045), returning to
+  `exe+307d0b8`. That is the subtract the field map names `exe+310157c` on 6acec6f4; this exe (2026-11-03) has it here.
+
+The battle sat paused for minutes on each hit and carried on (melee resumed, `DERPY_TP` intact, the general down
+to 3829), and memreader Plus's caves were not disturbed: only hardware breakpoints were used, which write no code.
+The worker thread already existed when the breakpoint was set, so a thread started **afterwards** is still unchecked,
+as is a software breakpoint near a memreader pattern or patch.
+
+Three plugin traps from the same run:
+
+- **x64dbg keeps breakpoints in `x64\db\Warhammer3.exe.dd64` and sets them again on the next attach.** The main-menu
+  test's execute breakpoint came back and stopped every frame.
+- **`DeleteAllBreakpoints` does not delete a hardware breakpoint**, whatever it answers. `ListBreakpoints` after it
+  still showed one. `ExecuteDebuggerCommand("bphwc <address>")` removes it; check the list before detaching.
+- **`run` with nothing armed waits for a pause that never comes** and holds the client until its timeout. Send it with
+  a short client timeout (`timeout 8 py tools/x64dbg_call.py ExecuteDebuggerCommand '{"command": "run"}'`) and poll
+  `GetDebugState` for `RUNNING` / `LOCKED`. `EvalExpression("tid()")` names the thread that stopped.
+
+1. `AttachProcess(pid)`. The target keeps running; `WaitForPause` simply times out.
+2. `SetHardwareBreakpoint(address, type "w", size 8)`. x86 has four debug registers, so at most four hardware
+   breakpoints at once.
+3. `run` (it waits for the next pause) or `WaitForPause`. A hardware write breakpoint traps **after** the write, so
+   the pause address is the instruction after the store. `Disassemble("cip-6", 3)` shows the store itself: on the
+   test, `mov qword ptr ds:[rax],rcx` in `vcruntime140`, and `ReadMemory` on the address showed the value that store
+   had just written.
+4. `GetCallStack` for the caller. On the test it gave two good frames and then garbage past `libffi`; expect the
+   same past any frame without unwind data.
+5. `bphwc <address>` for each hardware breakpoint (see the traps above), `ListBreakpoints` empty, then
+   `ExecuteDebuggerCommand("detach")`. Detach answers "TARGET_EXITED", but the target keeps running.
+
+In a battle: a pause stops every thread of the game. The battle freezes, and anything that talks to the game, the wh3
+bridge included, waits until it resumes. Get the man's pointer from `DERPY_TP.P.models(unit)` over the bridge first
+(`memreader_plus.tostring(m)` gives the hex), since nothing can be asked once a breakpoint has stopped the game.
+Follow `docs/LIVE_TESTING.md` and quit the game when the test is done.
 
 ## 11. After a game patch
 

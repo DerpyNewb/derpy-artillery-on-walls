@@ -14,9 +14,10 @@ the record of each session.
 - **Guns on walls.** 50 vanilla units can go up: every artillery unit, plus the war machines whose engine carries the
   gun, such as the Chaos Dwarf gun vehicles and the Hellcannon. A modded unit counts if the game classes it as
   artillery.
-- **Animal-drawn guns stay on the ground.** That covers 8 vanilla units: Cathay's Grand Cannon and Fire Rain Rocket
-  Battery, the Ogre Ironblaster and Gnoblar Scraplauncher, the Little Grom and the War Wagon (two versions each of
-  the last two). Archer chariots, sleds and a character's war machine are left out too.
+- **Animal-drawn guns stand in the middle of the walkway.** That covers 8 more vanilla units: Cathay's Grand Cannon
+  and Fire Rain Rocket Battery, the Ogre Ironblaster and Gnoblar Scraplauncher, the Little Grom and the War Wagon (two
+  versions each of the last two). They go back from the parapet, where the animal has no room, to the middle of the
+  walkway. Archer chariots, sleds and a character's war machine are left out.
 - **Guns turn all the way round.** On a wall a gun turns to its target and fires, under fire at will or an order,
   including at enemies inside the city behind it.
 - **Batteries pass each other on the walkway.** A gun on a wall takes half its usual room, but to enemy shots it is
@@ -78,7 +79,7 @@ There is no test framework.
 - **Every break is caught.** It then breaks the assembly 47 ways, each a plausible mistake (a test inverted, a gather
   with no range, a rejoin with the stack one slot off), and fails if any broken patch still passes.
 - **The unit lists.** Named units are checked in and out: the Magma Cannon, the Iron Daemon and the Deathshrieker
-  in; chariots, a character's war machine, the Luminark and Cathay's drawn guns out.
+  in; chariots, a character's war machine and the Luminark out; Cathay's guns and the Little Grom in the drawn list.
 - **The Lua.** `artillery_walls_tests.lua` loads the shipped script under Lua 5.1 against a stubbed battle and
   memreader. It covers the stall recovery, the wall-order queue, the crew spot rules and the multiplayer switch-off.
 - **The exe.** `--check` confirms the exe on disk is the build the patches were written for (6ae2a00b, patch 9.0.5),

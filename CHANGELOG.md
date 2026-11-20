@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-11-12
+
+Pack `A041`, same game build.
+
+- Guns drawn by an animal can now go on walls: Cathay's guns, Ogre artillery, Little Grom and Empire War Wagons.
+  They stand in the middle of the walkway, read from the wall section's `central_position()`, instead of at the
+  parapet, where the animal has no room. CA's hover preview still shows them at the parapet.
+
+## 2026-11-11
+
+Pack `1A09`, same game build.
+
+- Attacking artillery can shoot the walls again. A listed gun was infantry to CA's wall order, so an attacker's
+  right-click on an enemy wall stopped being an attack.
+- Only the side holding the walls can put guns on them. The owner is read from the gates at load (plain wall sections
+  own nothing), not from `is_attacker()`, because in a sally battle the garrison is the attacker.
+
 ## 2026-11-10, first release
 
 Workshop item 3837212899, pack `A862`, for game build 6ae2a00b (patch 9.0.5).

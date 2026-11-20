@@ -1,5 +1,5 @@
 -- Artillery on Walls: artillery and gun war machines may stand on settlement walls in siege battles, the
--- player's and the AI's alike. Single player only. Needs memreader Plus (Workshop 3811098873); without it, in a
+-- player's and the AI's alike, on the side that holds the walls (an attacker's guns stay vanilla and shoot them). Single player only. Needs memreader Plus (Workshop 3811098873); without it, in a
 -- multiplayer battle, or on a game build these caves were not made for, the battle stays vanilla and the script log
 -- says why.
 --
@@ -149,7 +149,7 @@ local WALL_GUNS = {
 	["wh_main_grn_art_goblin_rock_lobber"] = true,
 	["wh_pro04_chs_art_hellcannon_ror_0"] = true,
 }
--- 8 vanilla guns drawn by an animal: never on a wall, unit:is_artillery() or not
+-- 8 vanilla guns drawn by an animal: on a wall they stand in the middle of the walkway (CENTRE)
 local DRAWN = {
 	["wh2_dlc13_emp_veh_war_wagon_1"] = true,
 	["wh2_dlc13_emp_veh_war_wagon_ror_0"] = true,
@@ -181,7 +181,7 @@ local function at(hl) return mr.add(mr.add(mr.base,hl[1]*0x10000),hl[2]) end
 -- attachment in battlefield_engines: Cathay's two, the Ogre and Kislev vehicles, the Chaos Dwarf vehicles, the war
 -- wagon, the Bloodwrack Shrine) are other classes. Cathay's (exe+390f998) has no crew table at +0xc1c, and the
 -- script log stopped right after the turn, heading and settle fixes wrote into its fields (2026-11-09 run 27). Those
--- bodies get CA's own handling: no write of the mod's lands on them.
+-- bodies get CA's own handling: no write of the mod's lands on them, except a drawn gun's walk goal (CENTRE).
 local function is_gun(b) return mr.tostring(mr.read_pointer(b, 0)) == mr.tostring(at(CALLS.engine_vt)) end
 
 local function install()
@@ -222,8 +222,23 @@ local function install()
 end
 
 local function wall_gun(u)
-	if u:unit_class() == "com" or DRAWN[u:type()] then return false end
-	return WALL_GUNS[u:type()] == true or u:is_artillery()
+	if u:unit_class() == "com" then return false end
+	return WALL_GUNS[u:type()] == true or DRAWN[u:type()] == true or u:is_artillery()
+end
+
+-- Only the side holding the walls gets wall guns. A listed gun is infantry to CA's wall order (the wallgate and cursor
+-- caves), so an attacker's right-click on an enemy wall became a climb instead of CA's attack on the wall (a player
+-- report, 2026-11-11). The owner, not is_attacker(): in a sally battle the garrison attacks out of its own walls.
+-- A plain wall section owns nothing (-1: all 49 at Altdorf, 2026-11-11); the gates carry the garrison's alliance,
+-- counting from 0 where bm:alliances() counts from 1. Towers carry one too but are capture points that change hands,
+-- so they are skipped. Returns nil with no owned wall or gate: a field battle.
+local function wall_owner(buildings)
+	for i = 1, buildings:count() do
+		local b = buildings:item(i)
+		if (b:is_fort_wall() or b:has_gate()) and not b:is_fort_tower() and b:alliance_owner_id() >= 0 then
+			return b:alliance_owner_id() + 1
+		end
+	end
 end
 
 -- Physical artillery and crew can jam at stairs. Recovery requires a quiet motion window.
@@ -485,7 +500,7 @@ end
 -- native way. Moving the slot too keeps the wall controller from sending it back to the old point. Nothing is
 -- moved but the goal. Writing +0x18f instead fakes the arrival and leaves the locomotion in its other state
 -- (exe+3d2b638): the walk ends but the engine never turns or fires again (2026-11-09 run 5, two helstorm engines).
-local DOCK = {path = 0x710, walking = 4, target = 0x7f8, slot_point = 0x20, slot_body = 0x40}
+local DOCK = {path = 0x710, walking = 4, target = 0x7f8, slot_point = 0x20, slot_surface = 0x30, slot_body = 0x40}
 local DOCK_LOG = 0.05 -- m: a settle this short moved nothing worth a log line
 local DOCK_REACH = 2 -- m from its slot; a slot is at least 3.8 m from the next
 local DOCK_WAIT = 1500 -- ms standing still
@@ -558,6 +573,34 @@ local function pushers_near(eng)
 		end
 	end
 	return n > 0
+end
+
+-- Guns an animal draws stand in the walkway's middle (the author, 2026-11-12): the wall section's central_position(),
+-- 7.3 m in at Altdorf. copies: every field holding the engine's steering point, {x offset, z step} (run 48).
+local CENTRE = {min = 2, max = 12, slack = DOCK_REACH, match = 0.1, goal = 0x7f8,
+	copies = {{0x7f8, 8}, {0x838, 8}, {0x1e0, 8}, {0x368, 8}, {0x4e8, 8}, {0x194, 4}}}
+
+-- How far the middle of the walkway lies back from the parapet line through (mx, mz) facing (fx, fz), or nil.
+local function walk_middle(buildings, mx, mz, fx, fz)
+	local best, bd
+	for i = 1, buildings:count() do
+		local b = buildings:item(i)
+		if b:is_fort_wall() and not b:is_fort_tower() then
+			local c = b:central_position()
+			local d = (c:get_x() - mx)^2 + (c:get_z() - mz)^2
+			if not bd or d < bd then best, bd = c, d end
+		end
+	end
+	if not best then return nil end
+	local back = (mx - best:get_x()) * fx + (mz - best:get_z()) * fz
+	if back >= CENTRE.min and back <= CENTRE.max then return back end
+end
+
+-- A slot point moved straight back to `back` from the parapet line; nil when it is there already or further in.
+local function centred(px, pz, mx, mz, fx, fz, back)
+	local now = (mx - px) * fx + (mz - pz) * fz
+	if now >= back - CENTRE.slack then return nil end
+	return px - fx * (back - now), pz - fz * (back - now)
 end
 
 -- Crew posts in the parapet (ask 4). An engine fires only once deployed: vslot 0x658 (exe+307145c) is
@@ -747,6 +790,41 @@ local function queue_move(e,block,facing,width)
 	assert(mr.tostring(result)=='1','wall move was not queued')
 end
 
+-- Moves a drawn gun's slot and its engine's walk to the middle together, once the engine walks its own section toward
+-- the slot. CA cannot path to the middle, and a steer from a stair or the next section left the walkway (run 48).
+local function centre_slots(e, n, list)
+	e.middle = e.middle or {}
+	for k = 0, n - 1 do
+		local s = mr.read_pointer(list, k * 8)
+		local b, surface = mr.read_pointer(s, DOCK.slot_body), mr.read_pointer(s, DOCK.slot_surface)
+		local row = mr.read_pointer(s, 0x18)
+		local mx, mz, fx, fz = mr.read_float(row, 0x38), mr.read_float(row, 0x40), mr.read_float(row, 0x28), mr.read_float(row, 0x2c)
+		local key = mr.tostring(row)
+		if e.middle[key] == nil then e.middle[key] = walk_middle(bm:buildings(), mx, mz, fx, fz) or false end
+		local back = e.middle[key]
+		local sx, sz = mr.read_float(s, DOCK.slot_point), mr.read_float(s, DOCK.slot_point + 8)
+		local x, z
+		if back and not mr.is_null(b) and not mr.is_null(surface) then x, z = centred(sx, sz, mx, mz, fx, fz, back) end
+		if x then
+			local bx, bz = mr.read_float(b, U.pos), mr.read_float(b, U.pos + 8)
+			local gx, gz = mr.read_float(b, CENTRE.goal), mr.read_float(b, CENTRE.goal + 8)
+			if (gx - sx)^2 + (gz - sz)^2 <= CENTRE.match^2 and mr.tostring(mr.read_pointer(b, U.surface)) == mr.tostring(surface)
+				and (mx - bx) * fx + (mz - bz) * fz <= back + CENTRE.slack then
+				mr.write(s, DOCK.slot_point, x); mr.write(s, DOCK.slot_point + 8, z)
+				for _, c in ipairs(CENTRE.copies) do
+					if mr.read_float(b, c[1]) == gx and mr.read_float(b, c[1] + c[2]) == gz then
+						mr.write(b, c[1], x); mr.write(b, c[1] + c[2], z)
+					end
+				end
+				if not e.centred then
+					e.centred = true
+					log(string.format('an engine of %s moved to the middle of the walkway, %.1f m back from the parapet', e.unit:type(), back))
+				end
+			end
+		end
+	end
+end
+
 local function start_mover(entries)
 	local move_vt,wall_vt,fire_vt = mr.tostring(at({0x391,0x9980})),mr.tostring(at({0x391,0xd440})),mr.tostring(at({0x3ad,0xf528}))
 	local act
@@ -873,6 +951,7 @@ local function start_mover(entries)
 			local n = mr.read_int32(c,0x154)
 			if n==0 or n~=#bodies then return end
 			local slots,targets,d,docks = {},{},mr.read_pointer(c,0x158),{}
+			if e.drawn then centre_slots(e,n,d) end
 			local first = mr.read_pointer(d,0)
 			local zone = mr.read_pointer(c,0x98)
 			for k=0,n-1 do
@@ -982,7 +1061,9 @@ if _G.DERPY_AW_TEST then
 	_G.DERPY_AW_TEST.spot_keep, _G.DERPY_AW_TEST.lay_spot, _G.DERPY_AW_TEST.lay_spots = spot_keep, lay_spot, lay_spots
 	_G.DERPY_AW_TEST.SPOT_TRIES, _G.DERPY_AW_TEST.SLOT = SPOT_TRIES, SLOT
 	_G.DERPY_AW_TEST.wall_step, _G.DERPY_AW_TEST.queue_wall = wall_step, queue_wall
-	_G.DERPY_AW_TEST.wall_gun = wall_gun
+	_G.DERPY_AW_TEST.wall_gun, _G.DERPY_AW_TEST.wall_owner = wall_gun, wall_owner
+	_G.DERPY_AW_TEST.walk_middle, _G.DERPY_AW_TEST.centred, _G.DERPY_AW_TEST.CENTRE = walk_middle, centred, CENTRE
+	_G.DERPY_AW_TEST.centre_slots = centre_slots
 	_G.DERPY_AW_TEST.queue_move = queue_move
 	_G.DERPY_AW_TEST.ORDER_LOCATION = ORDER_LOCATION
 	_G.DERPY_AW_TEST.start_mover = start_mover
@@ -996,29 +1077,29 @@ if not ok then
 elseif not block then
 	log("not active: " .. why)
 else
-	local listed, entries = {}, {}
+	local listed, entries, owner = {}, {}, nil
 	local function scan()
+		-- read once, at load, before anyone can take a gate
+		owner = owner or wall_owner(bm:buildings())
+		if not owner then return end
 		local n = mr.read_int32(block, B.count)
-		local alliances = bm:alliances()
-		for a = 1, alliances:count() do
-			local armies = alliances:item(a):armies()
-			for r = 1, armies:count() do
-				local units = armies:item(r):units()
-				for i = 1, units:count() do
-					local u = units:item(i)
-					local p = mr.read_pointer(mr.ud_topointer(u), 8)
-					local id = mr.tostring(p)
-					if not listed[id] and n < B.max and wall_gun(u) then
-						-- the pointer before the count: the battle threads read the count first
-						mr.write(block, B.units + n * 8, p)
-						n = n + 1
-						mr.write(block, B.count, mr.uint32(n))
-						local controller = armies:item(r):create_unit_controller()
-						controller:add_units(u)
-						controller:release_control()
-						listed[id] = true
-						entries[#entries+1] = {unit=u,ptr=p,controller=controller,alliance=a}
-					end
+		local armies = bm:alliances():item(owner):armies()
+		for r = 1, armies:count() do
+			local units = armies:item(r):units()
+			for i = 1, units:count() do
+				local u = units:item(i)
+				local p = mr.read_pointer(mr.ud_topointer(u), 8)
+				local id = mr.tostring(p)
+				if not listed[id] and n < B.max and wall_gun(u) then
+					-- the pointer before the count: the battle threads read the count first
+					mr.write(block, B.units + n * 8, p)
+					n = n + 1
+					mr.write(block, B.count, mr.uint32(n))
+					local controller = armies:item(r):create_unit_controller()
+					controller:add_units(u)
+					controller:release_control()
+					listed[id] = true
+					entries[#entries+1] = {unit=u,ptr=p,controller=controller,alliance=owner,drawn=DRAWN[u:type()]}
 				end
 			end
 		end
@@ -1032,5 +1113,5 @@ else
 	bm:register_phase_change_callback("Deployment", safe_scan)
 	-- reinforcements and late arrivals: model time, so every machine adds a unit on the same tick
 	bm:repeat_callback(safe_scan, 2000, "derpy_artillery_walls")
-	log("active, " .. mr.read_int32(block, B.count) .. " wall guns at load")
+	log("active, " .. mr.read_int32(block, B.count) .. " wall guns at load, walls held by alliance " .. tostring(owner))
 end

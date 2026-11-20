@@ -746,7 +746,8 @@ time.
 
 Runs 38-39 at the first row: every gun lost its fire action and fired 0-1 times in 300 s.
 
-**The limit that stays.** A cannon will not fire nearly along its own wall. A target 250 m along it and 28 m out
+**The limit that stays.** (§32 found the cause: the next wall tower stands in the line of fire. The parapet guess
+below is wrong, and the block is legitimate.) A cannon will not fire nearly along its own wall. A target 250 m along it and 28 m out
 is 6 degrees off the wall line. The three cannons that turned to it sat aimed (`+0xce0` `b0034`), with fire
 actions, and did not shoot. The fourth (the eastmost) would have had three guns of its battery in its line, and
 stayed packed. No friendly unit stood west of them. A direct-fire shot there would cross the parapet, while the
@@ -859,3 +860,178 @@ docstring now says so.
    - The practice battle is the Dwarfs defending Altdorf with Derpy's Gunpowder Units' Ironblasters and
      Mountainbreaker (the GIF capture). That needs `!!!!derpy_resources` and `derpy_gunpowder_units` in the mod list.
      Rewrite it, with `--map major_a_emp`, before the next run.
+
+## 31. 2026-11-11: an attacker's guns would not shoot the walls (pack `1A09`, run 45)
+
+**Report (Workshop, 2026-11-11):** with the mod on, artillery cannot attack the castle walls; it tries to climb over
+them instead.
+
+**Cause.** `scan()` listed every alliance's guns. A listed gun is infantry to CA's wall order (the `wallgate` and
+`cursor` caves) and may use the wall links, so an attacker's right-click on an enemy wall stopped being CA's attack
+on the building. No test before this one had the player attacking with guns.
+
+**Fix.** Only the alliance that holds the walls is listed. `wall_owner()` reads it once, at load, from
+`building:alliance_owner_id()` + 1 on the first gate or wall that has an owner, skipping towers (capture points). It
+does not use `is_attacker()` because in a `settlement_sally` battle the garrison is the attacker
+(`lib_campaign_manager.lua:10685`). A field battle has no owner, so nothing is listed. The load line now ends
+"walls held by alliance N". `tools/artillery_walls_tests.lua` covers it, and three mutants of it fail the tests.
+
+**Run 45** (`Backup/artillery_walls/20261111/run45_*`, the Dwarfs attacking Altdorf, Empire AI holding it with a
+great cannon and a Helstorm):
+
+- Load: "2 wall guns at load, walls held by alliance 1". The two listed were the Empire's (run 43 listed 4).
+- **Plain wall sections own nothing.** All 49 read -1. The 6 gates read 0, and so did 40 of the 48 towers. Only the
+  gates make the owner readable.
+- A/B on wall 7710, with the Dwarf cannon 240 m out, halted, and the same real right-click at screen centre on the
+  outer face. Unlisted: an attack order, health 1.000 -> 0.865 in about 12 s. Listed (its pointer written into the
+  block by hand, as `A862` listed it): no order for 30 s, no shot, health unchanged.
+- The climb route itself was not reproduced, because the listed gun took no order at all from there.
+- Neither version gives an order for a wall click from 550 m out.
+
+**Not done:**
+- Uploaded 2026-11-11 08:59 with node and the Mod Manager's steamworks binding (content and change note only).
+  Steam's `workshop_log.txt` reads "Upload finished ... : OK", manifest 5187490254477915890. The Workshop folder
+  holds `1A09` (md5 `1a093772d4cff29fccee7709dcc96e96`), and the `A862` backup is in `Backup/artillery_walls/20261111/`.
+- The repo mirror is synced but not committed.
+- A sally battle was not run.
+- An attacker can no longer put guns on walls it has taken.
+
+## 32. 2026-11-12: a cannon aimed along its wall is blocked by the next tower (pack `1A09`, run 46)
+
+This was verified in game with x64dbg attached (`tools/x64dbg_call.py`, `docs/BATTLE_ENGINE_RE.md` §10b). The setup
+was the Altdorf practice battle with the Dwarfs holding the wall, memreader Plus and Third-Person Battles loaded, and
+the enemy held and invincible. The Dwarf cannons were docked at x 569-584 on the walkway (y 106.6, z -339) and the
+organ guns at x 698-712.
+
+- **Front control:** the cannons fired 3 shots each and the organ guns 5 each.
+- **Target along the wall** (goblins at x 325-365, y 92, z -410 to -419): in 150 s the cannons fired 1/0/0/0 while
+  they sat aimed (`+0xce0` `b0034`), and the organ guns fired 8-9 each.
+
+**The chain** (build `6ae2a00b`; hardware breakpoints, which fire on the battle worker thread):
+
+1. The attack plan step `exe+328ec68` runs for both batteries. For each target, `exe+30db2f4` leaves a code at
+   `[rbp+60]`. It was 0 for the organ guns and 2 for the cannons, so the cannons never reach the fire dispatch
+   (vslot `+0x380`, called at `328f27a`).
+2. Code 2 comes from `exe+30db6e0`: the unit-level can-fire test `exe+30de230` failed, and the target is not a
+   building (`+0x50` != 3).
+3. `30de230` runs the line-of-fire query `exe+2f5c4e8` (battle `+0x1a0`) from three points: the entity at `+0xc90`,
+   then `+0xc30` and `+0xc50`. It passes when 2 of the 3 do.
+4. Inside `2f5c4e8`, the trajectory was reachable (`30a879c` true, read at `2f5c5d6`). The collision query
+   `exe+2dba6e0` (it returns to `2f5c6d8`) found one hit of type `0x800`, object `7FF4D982ED28`, with query flags
+   `0x4800` and no expected object. Under those flags any hit fails the test. One of the three samples had no hit.
+   The hit count is at `[144339E8C]`, and the list is at `[144339E90]` with 0xe0-byte entries (type at entry
+   `+0x10`, object at `+8`). The probe is `Backup/artillery_walls/20261112/run46_los_probe.sh`.
+5. The object's vtable is `exe+3ae2850`, and its box at `+0xb8` runs from (529.9, 91.6, -352.3) to (550.4, 129.9,
+   -322.0). That is the pointed-roof tower 20-40 m west of the battery (`run46_tower_along_wall.png`). Type `0x800`
+   is a building piece. The same function lets such a hit through only when it is the building being attacked or
+   shares its `+0x60` group.
+
+The geometry agrees. From the cannons (578, -339) to the goblins (345, -419), the line is at z -348.6 and about
+y 106 when it passes x 550, which is inside the tower's box. From the organ guns (704, -339), it is already at
+z -373 there, south of the tower. CA's attack cursor shows its red blocked-shot cross on that tower (the author's
+screenshot).
+
+**Verdict:** the block is legitimate, and the author agrees ("the cannons not firing are fine because its being
+blocked by the towers"). Nothing was changed. Answering this query "clear" for listed guns would make them fire into
+their own tower. §27's parapet guess was wrong: the next tower blocks the shot, and a gun docked further from that
+tower clears it.
+
+
+## 33. 2026-11-12: guns pulled by an animal stand in the middle of the walkway (pack `A041`, runs 47-53)
+
+The author asked for the eight units in `DRAWN` (refused since §23 C) to go on walls, standing in the middle of the
+walkway instead of at the parapet, where the animal has no room.
+
+**What changed.**
+
+- `wall_gun()` no longer refuses `DRAWN` units.
+- `centre_slots()` runs for drawn units in the mover's wall branch. It moves a slot and its engine's walk to the middle
+  of the walkway together. The middle is the nearest wall section's `building:central_position()`, measured back from
+  the slot row's parapet line (midpoint at row `+0x38`/`+0x40`, facing at `+0x28`/`+0x2c`). At Altdorf's
+  `emp_wall_straight_20` it is 7.3 m back. A reading outside 2-12 m is ignored.
+- It acts only when three things hold: the engine is on its last leg (its steering point is the slot point), it stands
+  on the slot's own surface (body `+0x920` equals slot `+0x30`), and it is no further back than the middle plus 2 m.
+  Then it writes the slot point and every steering copy that holds the old point: `+0x7f8`, `+0x838`, `+0x1e0`,
+  `+0x368` and `+0x4e8` (x, y, z) and `+0x194` (x, z).
+- The log says "an engine of <unit> moved to the middle of the walkway, 7.3 m back from the parapet".
+
+**Findings.**
+
+- Cathay's engine class (`exe+390f998`) keeps its steering point in those six places. During a walk on the ground all
+  six held the same waypoint about 4 m ahead (run 48), so `+0x7f8` is the next waypoint, not the destination.
+  Writing `+0x7f8` alone was put back once (run 47). Writing it with the copies held.
+- Moving the controller's slot point alone moves nothing (run 47).
+- Two earlier builds failed in game:
+  - `B6B3` moved every slot as soon as the order came and rewrote the steering point of any engine on the wall. One
+    cannon was redirected at the stair head, 16.5 m in, steered straight off it and ended at ground level under the
+    walkway at (572.8, 91.6, -331.7) (`aw_b6b3_e0_under.png`).
+  - `227B` limited the rewrite to the last leg at walkway height. The same cannon went under the walkway again from
+    the stair head, and a rocket cart redirected from the next wall section stopped there in path state 7.
+  - `A041` adds the surface and distance conditions. The tests run `centre_slots` against a fake memory, and seven
+    mutants (one per condition, plus the copies and the slack) are all caught.
+- **Run 50 (`A041`):** all four cannons went straight to the middle, and none came nearer the parapet than 7.3 m.
+  Three rocket carts did too (closest 1.6-7.3 m). None went under the walkway, and there were no script errors
+  (`aw_run50_cannons.png`, `aw_run50_rockets.png`). The fourth rocket cart wedged sideways at the parapet at x 710.7,
+  by the end of its section, where CA's slot (x 712.8) sits on the next, short piece. The same cart wedged there in
+  run 47 before any centring code existed, and the rule leaves it alone because it stands on another surface.
+- **Range from the middle (run 50).** Ammunition was kept topped up, and each step ran 40 s real time at 3x.
+
+  | enemy distance from the wall | cannon rounds | rockets |
+  |---|---|---|
+  | 121 m | 20 | 128 |
+  | 81 m | 20 | 133 |
+  | 41 m | 19 | 132 |
+  | 21 m | 1 | 14 |
+
+  A centred gun fires normally down to about 40 m and almost stops at the foot of the wall.
+- **Control (run 51):** `A041` with `bm.buildings` shadowed after load, so no middle is found. The Cathay guns stood
+  at the parapet 1.4 m short of their slots in path state 4 for the whole run, and fired nothing at 21, 41, 121 or
+  226 m. Ending the walk where they stood changed nothing. So there is no clean parapet comparison for the
+  close-range limit. In run 28, on an older build, Cathay's cannons did fire at the parapet.
+- One rocket cart stuck in Altdorf's streets at (675.3, 106.4, -54.0) in runs 49 and 51 alike, with and without
+  centring. That is CA's pathing.
+- Run 47's close-range readings are void. The batteries had run dry, and once a unit runs out of ammunition its crew
+  leave the guns (the unit's body list grew to 44 men). A refill does not bring them back, so keep ammunition topped
+  up (`AWE.start` does it below 20).
+- The game's Lua answered true to `x == x` for a NaN, as it does to `<`, so `x == x` does not filter NaN.
+
+**Runs 52-53: Ogres and Kislev (`A041`).**
+
+- The Ironblaster, the Gnoblar Scraplauncher and the Little Grom are one entity each, with body class `390f998` like
+  Cathay's engines, and `is_artillery()` false. Each walked to the middle of the walkway (z -331.8, 7.2 m back) and
+  ended its walk there. The log shows "moved to the middle" once per gun, then "recovering stalled" a few seconds
+  later, as with Cathay's. No script errors in either run.
+- Shots per window, enemy straight in front, 48 s real at 3x (`aw_sweep_log.py`, a per-shot timestamp log):
+
+  | enemy distance from the wall | Ironblaster | Scraplauncher | Little Grom |
+  |---|---|---|---|
+  | 120 m | 8 | 6 | 9 |
+  | 80 m | 8 | 6 | 0 |
+  | 40 m | 8 | 6 | 0 |
+  | 20 m | 8 | 1 | 0 |
+
+- The Ironblaster fired every 19.2 s of game time even at 20 m, so its close-range limit is not the Cathay one.
+- Two stretches of no fire are unexplained. In run 52's first sweep the Scraplauncher fired nothing for about 10
+  game minutes, even with the enemy straight in front. Placed again later, it fired at every distance. In run 53 the
+  Little Grom fired at 120 m, then nothing after the enemy was moved to 80 m. The author was clicking in the game
+  during run 52, and run 53 was stopped before the 120 m re-check, so neither is pinned to the mod.
+- `wh3_main_pro_ksl_veh_little_grom_0` (the prologue Little Grom) is dropped from a practice army and was not run.
+- Frames: `aw_run52_ironblaster.png`, `aw_run52_scraplauncher.png`, `aw_run53_little_grom.png`; logs
+  `script_log_run52_ogres.txt`, `script_log_run53_kislev.txt`.
+
+**Not done.**
+
+- The War Wagons and the prologue Little Grom were not run. The per-engine fixes stay gated on `is_gun` (class
+  `3adee48`), and centring writes only fields that hold the exact steering point.
+- A drawn gun of class `390f998` turns only within CA's arc, because the `turn` cave is gated on `3adee48`.
+- A modded drawn gun is not in `DRAWN`, so it stands at the parapet, where Cathay's class got stuck in run 51.
+- CA's hover preview still shows a drawn gun at the parapet, because it draws CA's own slots and the mod moves a slot
+  only on the last leg (the author asked, 2026-11-12).
+- **Uploaded 2026-11-12 23:04** with node and the Mod Manager's steamworks binding (content and change note only):
+  Steam's `workshop_log.txt` reads "Upload finished ... : OK", manifest 6581699048247318484, `file_size` 1092526,
+  tags unchanged. Change note: `PATCH_NOTES_ARTILLERY_WALLS_20261112.md`. All 38 derpy Workshop packs hashed the
+  same before and right after. The Workshop folder and `Modpacks/` hold `A041` (md5
+  `a04160c84a6862fc6833c495e2e15625`); `1A09` and `A041` are backed up in `Backup/artillery_walls/20261112/`.
+- The Workshop description is not updated: `WORKSHOP_PAGE.md` holds the edited text.
+- The repo mirror is not synced.
+- The practice battle is now Kislev defending Altdorf. Test preferences are reverted.

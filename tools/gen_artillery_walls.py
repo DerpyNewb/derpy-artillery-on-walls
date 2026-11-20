@@ -1,6 +1,6 @@
 """Artillery on Walls (derpy_artillery_walls.pack): artillery and gun war machines may stand on settlement walls in
 siege battles, the player's and the AI's. Writes the generated block of the shipped battle script and the two
-battle-AI weight files; the pack is built with RPFM open.
+battle-AI weight files; the pack is built through rpfm_server, which starts itself.
 
     py tools/gen_artillery_walls.py              write the Lua's generated block and battle_ai/bai_values_*.txt
     py tools/gen_artillery_walls.py --check      exit 1 when the shipped files differ from what this writes, or the exe
@@ -8,7 +8,7 @@ battle-AI weight files; the pack is built with RPFM open.
                                                  or a wall gun has more crew on one engine than the Lua's SLOT_MAX
     py tools/gen_artillery_walls.py --selftest   run the SHIPPED cave bytes under unicorn: every path, register, the stack
                                                  at each call; then break the assembly and prove each break is caught
-    py tools/gen_artillery_walls.py --pack       build Modding Files/Modpacks/derpy_artillery_walls.pack (RPFM open)
+    py tools/gen_artillery_walls.py --pack       build Modding Files/Modpacks/derpy_artillery_walls.pack (rpfm_server starts itself)
 
 The caves (one per check, docs/sessions/HANDOFF_20261031_ARTILLERY_ON_WALLS.md):
     climb  exe+3014da8(unit)  in the table: return unit+0x1a4 == 0, skipping the battle_entities flag and is_infantry
@@ -68,12 +68,13 @@ The block holds native addresses, count and up to 250 unit pointers at +100. Eac
 before publishing the count. Every battle resets the count, including rematches.
 
 Which units: every artillery unit, and a war machine whose engine carries the gun or whose engine body is an
-artillery-type entity (the Chaos Dwarf vehicles) - not archer chariots, sleds or a character's war machine, and not a
-gun drawn by an animal (a draught mount in land_units: Cathay's two, the Ogre Ironblaster and Scraplauncher, the
-Little Grom, the War Wagon - not the Chaos Dwarf vehicles' hidden mounts; the author's call, 2026-11-09, after Cathay's drawn engine class crashed the game on a
-wall). Not battlefield_engines' draught attachment: the Deathshrieker names one and has no animal. Those go in the Lua's DRAWN list, which it refuses even when
-unit:is_artillery() would let them in. Computed from vanilla land_units; the Lua adds any modded unit for which
-unit:is_artillery() is true (a modded drawn gun is not caught: the Lua cannot see its draught attachment).
+artillery-type entity (the Chaos Dwarf vehicles) - not archer chariots, sleds or a character's war machine. A gun drawn
+by an animal (a draught mount in land_units: Cathay's two, the Ogre Ironblaster and Scraplauncher, the Little Grom, the
+War Wagon - not the Chaos Dwarf vehicles' hidden mounts) goes in the Lua's DRAWN list. Those stand in the middle of the
+walkway, not at the parapet (the author, 2026-11-12; they were refused from 2026-11-09). Not battlefield_engines'
+draught attachment: the Deathshrieker names one and has no animal. Computed from vanilla land_units; the Lua adds any
+modded unit for which unit:is_artillery() is true (a modded drawn gun stands at the parapet: the Lua cannot see its
+draught attachment).
 
 Needs keystone-engine and unicorn (pip). AI: CA's battle_ai/bai_values_major.txt and _minor.txt with OCCUPY_WALL's
 AIUF_ARTILLERY raised from -1.0 (never) to the 0.65 melee and ranged units get.
@@ -587,7 +588,7 @@ def lua_block(caves, guns, drawn):
     for g in guns:
         lines.append('\t["%s"] = true,' % g)
     lines.append("}")
-    lines.append("-- %d vanilla guns drawn by an animal: never on a wall, unit:is_artillery() or not" % len(drawn))
+    lines.append("-- %d vanilla guns drawn by an animal: on a wall they stand in the middle of the walkway (CENTRE)" % len(drawn))
     lines.append("local DRAWN = {")
     for g in drawn:
         lines.append('\t["%s"] = true,' % g)

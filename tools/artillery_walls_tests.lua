@@ -127,9 +127,37 @@ assert(not beside(reaper({P[1],P[2],{index=2,x=651.1,y=97.5,z=-191.3}})), 'nor o
 assert(not beside(reaper({{index=4,x=653.5,y=100.7,z=-191}})), 'no pusher at all is not a crew around it')
 local function fake(key, art) return {unit_class = function() return 'art' end, type = function() return key end, is_artillery = function() return art end} end
 assert(DERPY_AW_TEST.wall_gun(fake('wh_main_emp_art_great_cannon', true)), 'a walked cannon goes on a wall')
-assert(not DERPY_AW_TEST.wall_gun(fake('wh3_main_cth_art_grand_cannon_0', true)), 'a gun an animal draws does not, artillery or not')
+assert(DERPY_AW_TEST.wall_gun(fake('wh3_main_cth_art_grand_cannon_0', true)), 'a gun an animal draws goes on a wall too')
+assert(DERPY_AW_TEST.wall_gun(fake('wh3_main_ogr_veh_ironblaster_0', false)), 'even when it is not artillery to the script')
+-- drawn guns stand in the middle of the walkway: Altdorf's 20 m section, parapet at z -339, centre at z -331.7 (run 46)
+local function piece(kind, x, z) return {is_fort_wall = function() return kind ~= 'house' end, is_fort_tower = function() return kind == 'tower' end,
+    central_position = function() return {get_x = function() return x end, get_z = function() return z end} end} end
+local function pieces(...) local t = {...} return {count = function() return #t end, item = function(_, i) return t[i] end} end
+local middle, centred = assert(DERPY_AW_TEST.walk_middle), assert(DERPY_AW_TEST.centred)
+local function near(a, b) return a and math.abs(a - b) < 0.01 end
+assert(near(middle(pieces(piece('wall', 560, -331.7), piece('wall', 580, -331.7)), 580, -339, 0, -1), 7.3), 'the section under the slot sets the middle')
+assert(near(middle(pieces(piece('tower', 581, -337), piece('wall', 580, -331.7)), 580, -339, 0, -1), 7.3), 'a tower nearer the parapet is not a wall section')
+assert(near(middle(pieces(piece('wall', 92.7, 50)), 100, 50, 1, 0), 7.3), 'a wall facing +x reads along x')
+assert(middle(pieces(piece('wall', 580, -338.5)), 580, -339, 0, -1) == nil, 'a centre 0.5 m back is not a walkway middle')
+assert(middle(pieces(piece('wall', 580, -319)), 580, -339, 0, -1) == nil, 'nor one 20 m back')
+assert(middle(pieces(piece('house', 580, -331.7), piece('tower', 580, -331.7)), 580, -339, 0, -1) == nil, 'no wall section, no middle')
+local x, z = centred(578.2, -339, 580, -339, 0, -1, 7.3)
+assert(near(x, 578.2) and near(z, -331.7), 'a parapet slot moves straight back to the middle')
+x, z = centred(100, 47, 100, 50, 1, 0, 7.3)
+assert(near(x, 92.7) and near(z, 47), 'along x on a wall facing +x')
+assert(centred(578.2, -331.7, 580, -339, 0, -1, 7.3) == nil, 'a slot in the middle stays')
+assert(centred(578.2, -333.2, 580, -339, 0, -1, 7.3) == nil, 'a slot settled 1.5 m short of it is not walked again')
+assert(centred(578.2, -325, 580, -339, 0, -1, 7.3) == nil, 'and none is pushed out toward the parapet')
 assert(DERPY_AW_TEST.wall_gun(fake('wh3_dlc23_chd_veh_magma_cannon', false)), 'a ridden one with no animal still does')
 assert(DERPY_AW_TEST.wall_gun(fake('mod_art_unknown', true)), 'and a modded artillery unit')
+-- only the side holding the walls is listed: an attacker's listed gun climbed the wall it was told to shoot (2026-11-11)
+local function bld(kind, owner) return {is_fort_wall = function() return kind ~= 'house' end, has_gate = function() return kind == 'gate' end,
+    is_fort_tower = function() return kind == 'tower' end, alliance_owner_id = function() return owner end} end
+local function town(...) local t = {...} return {count = function() return #t end, item = function(_, i) return t[i] end} end
+local owner = DERPY_AW_TEST.wall_owner
+assert(owner(town(bld('house', 1), bld('tower', 1), bld('wall', -1), bld('gate', 0))) == 1, 'a tower the attacker took does not decide; the gate held by alliance 0 is bm:alliances():item(1)')
+assert(owner(town(bld('wall', -1), bld('gate', 1))) == 2, 'gates held by the second alliance: a sally, the garrison attacking')
+assert(owner(town(bld('house', 0), bld('tower', 0))) == nil, 'a field battle has no wall owner, so nobody is listed')
 print('artillery native retry and crew checks passed')
 
 local calls,writes,allocations={},{},{}
@@ -413,3 +441,47 @@ assert(block == nil and why:find('single player only', 1, true), 'multiplayer sa
 writes, block, why = install_in(false)
 assert(#writes == 0 and why:find('native bridge', 1, true), 'single player goes on to install')
 print('artillery crew spot memory contract passed')
+
+-- a drawn gun's slot and its engine's walk move to the middle together, and only for an engine walking its own section
+-- toward the slot: CA could not path a cart to the middle, and steers from a stair or the next section left the walkway (run 48)
+local function centring(o)
+    local mem = {}
+    local LIST, SLOT, ROW, BODY, SURF = 0x1000, 0x2000, 0x3000, 0x4000, 0x5000
+    mem[LIST] = SLOT
+    mem[SLOT + 0x18], mem[SLOT + 0x20], mem[SLOT + 0x24], mem[SLOT + 0x28], mem[SLOT + 0x30], mem[SLOT + 0x40] = ROW, 578.2, 106.6, -339, SURF, BODY
+    mem[ROW + 0x28], mem[ROW + 0x2c], mem[ROW + 0x38], mem[ROW + 0x40] = 0, -1, 580, -339
+    mem[BODY + 0x920] = ({same = SURF, other = 0x6000, none = 0})[o.surf or 'same']
+    mem[BODY + 0x910], mem[BODY + 0x914], mem[BODY + 0x918] = 578.2, 106.6, o.bz or -337.6
+    local copies = {{0x7f8, 8}, {0x838, 8}, {0x1e0, 8}, {0x368, 8}, {0x4e8, 8}, {0x194, 4}}
+    local gx, gz = (o.goal or {578.2, -339})[1], (o.goal or {578.2, -339})[2]
+    for _, c in ipairs(copies) do mem[BODY + c[1]], mem[BODY + c[1] + c[2]] = gx, gz end
+    if o.odd then mem[BODY + 0x1e0], mem[BODY + 0x1e8] = 600, -300 end
+    memreader_plus = {read_pointer = function(p, off) return mem[p + off] or 0 end, read_float = function(p, off) return mem[p + off] or 0 end,
+        write = function(p, off, v) mem[p + off] = v end, is_null = function(p) return p == 0 end, tostring = tostring}
+    bm = {buildings = function() return pieces(piece('wall', 560, -331.7), piece('wall', 580, -331.7)) end}
+    DERPY_AW_TEST = {}
+    dofile('Modding Files/source/artillery_walls/script/battle/mod/derpy_artillery_walls.lua')
+    local e = {unit = {type = function() return 'wh3_main_cth_art_grand_cannon_0' end}}
+    DERPY_AW_TEST.centre_slots(e, 1, LIST)
+    local after = {slot_z = mem[SLOT + 0x28]}
+    for _, c in ipairs(copies) do after[c[1]] = {mem[BODY + c[1]], mem[BODY + c[1] + c[2]]} end
+    DERPY_AW_TEST.centre_slots(e, 1, LIST)
+    after.again, after.goal_again = mem[SLOT + 0x28], mem[BODY + 0x800]
+    return after
+end
+local function at(v, x, z) return math.abs(v[1] - x) < 0.01 and math.abs(v[2] - z) < 0.01 end
+local function moved(a) return math.abs(a.slot_z + 331.7) < 0.01 end
+local function kept(a) return a.slot_z == -339 and at(a[0x7f8], 578.2, -339) end
+local a = centring{}
+assert(moved(a) and math.abs(a.again + 331.7) < 0.01 and math.abs(a.goal_again + 331.7) < 0.01, 'a gun docked at its parapet slot moves to the middle once')
+for _, off in ipairs({0x7f8, 0x838, 0x1e0, 0x368, 0x4e8, 0x194}) do assert(at(a[off], 578.2, -331.7), 'every copy of its walk moves with the slot') end
+a = centring{odd = true}
+assert(at(a[0x7f8], 578.2, -331.7) and at(a[0x1e0], 600, -300), 'a field holding anything else is left alone')
+assert(moved(centring{bz = -330}), 'one walking out to its slot moves once it is no further in than the middle')
+assert(kept(centring{bz = -322.5}), 'not from the stair head, 16.5 m in: the slot stays at the parapet too')
+assert(kept(centring{bz = -329.5}), 'nor from 9.5 m in, past the slack')
+assert(kept(centring{surf = 'other'}), 'nor from the next section, a different walkway')
+assert(kept(centring{surf = 'none'}), 'nor off the wall')
+local w = centring{goal = {578.0, -330}, bz = -335}
+assert(w.slot_z == -339 and at(w[0x7f8], 578.0, -330), 'a waypoint short of the slot is CA path, not the end of the walk')
+print('artillery drawn gun centring passed')
