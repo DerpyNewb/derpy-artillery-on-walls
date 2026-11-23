@@ -13,6 +13,12 @@ file in the third-person pack holding an address. The session record is
 handoffs (`docs/SESSION_INDEX.md`, through 2026-10-21) added to sections 3, 5 and 14 and wrote sections 12 and 13,
 all on the same build.
 
+**Patch 9.0.5 (2026-11-03) moved every RVA**: the exe is now build `6ae2a00b`. The addresses below are still
+6acec6f4's unless a line says otherwise (section 10b's were read on 6ae2a00b). The struct offsets that were checked
+did not move (`docs/sessions/HANDOFF_20261103_ARTILLERY_WALLS_NEXT.md`: 31 functions decompile alike on both). To
+carry an address across, use `tools/exe_migrate.py` (section 11); `platform.lua`'s `BUILDS` row for `6ae2a00b` and
+`docs/sessions/PATCH_NOTES_20261103_THIRD_PERSON.md` list the third-person pack's fields on both builds.
+
 ## 1. The tools, and which question each answers
 
 | Question | Tool | Cost |
@@ -32,7 +38,8 @@ all on the same build.
 
 `exe_re.py` reads the exe **on disk** with capstone and numpy, read-only, with the game shut or running. The
 on-disk code is byte-identical to the live code (checked 2026-10-16), so it is the safe way to ask. `--selftest`
-checks each command against a fact of this build. Two traps it works around:
+checks each command against a fact of the current build, 6ae2a00b, and `WH3_EXE=<image.bin>` points it at an older
+build's snapshot (section 11). Two traps it works around:
 
 - **The section names are disguised.** The code is in `.udata` at RVA 0x1000 (0x33a6000 bytes), the vtables are
   in `.xcode`, and `.text` is a 0x200-byte stub. A tool that trusts `.text` finds nothing. `exe_re.py` takes the
@@ -308,8 +315,8 @@ answers the existing cave, so a later battle reads its block pointer back out of
 
 Every model class's update reaches `3086f04`: the subclass `312de40` calls it first, and so do seven other
 updates. Measured on a horse. `tools/third_person_cave.py` assembles the cave with keystone and runs the shipped
-bytes under unicorn: every path, register and stack alignment, plus 8 broken variants (22 now, with 18 more for the
-carrier cave, section 13). Live, 795 stops with no
+bytes under unicorn: every path, register and stack alignment, plus 8 broken variants (25 on 2026-11-23, with 18 more
+for the carrier cave, section 13). Live, 795 stops with no
 fault (session handoff 2026-10-17 section 10).
 
 **The strike** (2026-10-29, section 12) is the second request the update cave serves. Its entry compares rcx with the
@@ -362,10 +369,11 @@ How it works and why:
 - **Reading its output:** a struct pointer typed `longlong *` indexes in qwords (`param_1[0xdf]` is `+0x6f8`); a
   virtual call prints as `(**(code **)(*plVar + 0x80))()`, the slot offset in plain sight; a byte flag compares
   with `'\x01'`. Rename nothing in the project (it is read-only); carry names in this document instead.
-- **The GUI** (`ghidraRun.bat`, open `ghidra_cache\wh3_6acec6f4.gpr`) is for browsing around one function. Analyse
-  a selection, never the whole program.
-- **After a game patch** the project is for the old exe: re-run `--import` (it overwrites), and rename
-  `PROJECT` in the wrapper to the new build.
+- **The GUI** (`ghidraRun.bat`, open `ghidra_cache\wh3_<build>.gpr`, `wh3_6ae2a00b.gpr` for the current exe) is for
+  browsing around one function. Analyse a selection, never the whole program.
+- **After a game patch**, `--import` makes a new project named after the new exe's stamp and keeps the old one.
+  `WH3_BUILD=<stamp>` decompiles the old build, and the old project's bytes are the pre-patch snapshot that
+  section 11's migration needs.
 
 ## 10b. x64dbg: which instruction wrote it, live
 
@@ -441,6 +449,14 @@ bridge included, waits until it resumes. Get the man's pointer from `DERPY_TP.P.
 Follow `docs/LIVE_TESTING.md` and quit the game when the test is done.
 
 ## 11. After a game patch
+
+A patch moves every RVA, and unevenly. The route that carried 9.0.5 (2026-11-03): dump the old build's Ghidra project
+(section 10) with `tools/ghidra/DumpImage.java` into `Modding Files/Backup/exe_snapshots/image_<build>.bin`, then
+`py tools/exe_migrate.py --old <image.bin> --new <exe>` finds each code, vtable or data address in its list
+(`ARTWALLS`, Artillery on Walls' addresses; add the ones you need) on the new exe. The
+third-person pack's 32 `BUILDS` fields were carried the same way, by a session script that did what `exe_migrate.py`
+does, while `probes/tp_find_walk_rvas.py` found nothing from its old anchors
+(`docs/sessions/PATCH_NOTES_20261103_THIRD_PERSON.md`). The steps below then check the result.
 
 1. `py tools/third_person_patterns.py` prints the new build stamp and the play command's fields.
 2. Find the gate again: search the code for the 18 bytes in section 8. A patch can move them, and the `75 5c`
@@ -646,7 +662,8 @@ The third-person pack's multiplayer net mode, built and tested offline only: no 
 `main.lua`, `combat.lua`, the entry `script/battle/mod/derpy_third_person.lua`, and `tools/third_person_cave.py`, which
 assembles both caves and runs the shipped bytes under unicorn (`--selftest`: every path, a lost race on each free, and
 29 broken variants, 11 of the update cave and 18 of the carrier cave, each caught; `--check` prints the two sizes below,
-599 and 613 bytes on 2026-10-22). The sending rules also run in a two-machine lockstep simulation
+599 and 613 bytes on 2026-10-22). (2026-11-23: 25 and 18 broken variants, and the update cave is 1011 bytes since the
+strike, section 9.) The sending rules also run in a two-machine lockstep simulation
 (`tools/third_person_lockstep.lua`). One-machine live facts are Task 2's (the record's "Replay"). The decisions are the
 record's "Rulings"; what only two machines can answer is its "Live session checklist".
 
@@ -659,8 +676,8 @@ then the man.
 
 **The carrier word.** 32 bits: 31-24 the magic `0xD7`; 23-20 the op, 1 GUARD_ON, 2 GUARD_OFF, 3 DISARM, 4 ARM, 5
 HELLO; 19-16 flags, bit 16 shots and bit 17 charge, bits 18-19 unassigned and ignored by both sides (a HELLO's flags are
-not read); 15-0 the body's id, his `+0x258`, or for HELLO the protocol version in 15-8 (`HELLO_VERSION`, 2 since
-2026-10-22, in `platform.lua` and in `tools/third_person_cave.py`; version 1 carried an army slot) and the sender's
+not read); 15-0 the body's id, his `+0x258`, or for HELLO the protocol version in 15-8 (`HELLO_VERSION`, in
+`platform.lua` and in `tools/third_person_cave.py`: 3 since Ruling 34, 2 from 2026-10-22; version 1 carried an army slot) and the sender's
 player slot in 7-0, 0 to 31. Game Lua numbers are float32, so the word is never one Lua number:
 `M.carrier` returns two u16 halves, `hi = 0xD7 * 256 + op * 16 + flags` and `lo = id`, and `out.carrier` writes `lo`
 then `hi` as the four raw bytes of RELOAD_TIME's float field (tag `0xa`), so the u32 on the wire is `hi << 16 | lo`. As
@@ -695,7 +712,7 @@ The two pointers it jumps or calls through, `skip` (`exe+2ecfcc5`) and `map_look
 written before the cave goes in and never zeroed by a later build: a cave already past its match goes through them.
 
 **The guard table** (code). 16 entries of `{man pointer, u32 id at +8}` at mailbox block `+0x100`, `count` at `+0x54`.
-The update cave (section 9; now 599 bytes) has a second half: on every man's update while `count > 0`, it looks for his
+The update cave (section 9; 599 bytes then, 1011 on 2026-11-23) has a second half: on every man's update while `count > 0`, it looks for his
 pointer among the 16. Found and alive, it stops the engine's four orders on him as the single-player guard does (the
 regiment's walk, the two moves, the melee attack, through `walk_stop`); found and dead, it frees his entry. Single
 player never sets `count`, so that half costs it one compare. Both free paths take the entry with `lock cmpxchg` of the
@@ -794,8 +811,9 @@ when a player presses F2. Single player has no handshake.
   `+0x308`; single player still points him back at his own fragment directly.
 - A push refused (the gate bytes set, no queue) is not marked sent, so it goes again.
 
-**Refusals, and what the player sees.** The entry passes `bm:is_multiplayer()` to `M.build`. Net mode needs build
-`6acec6f4` and its `BUILDS` row, then `install_net`, which refuses in this order: the MOVE, HALT and RELOAD_TIME ids
+**Refusals, and what the player sees.** The entry passes `bm:is_multiplayer()` to `M.build`. Net mode needs a
+`BUILDS` row that carries the queued-command fields (`g_move` and the rest; 6acec6f4's and 6ae2a00b's do, and until
+2026-11-03 the test was a literal `6acec6f4`), then `install_net`, which refuses in this order: the MOVE, HALT and RELOAD_TIME ids
 not registered or with no registry entry; no mailbox block; the six bytes at `exe+2ecfcb7` not the expected ones; the
 carrier cave refused; the gate's bytes not the game's own branch (read, not patched: the build has just taken out a gate
 a battle before left in); the gate's write refused, in or then out (`the order gate cannot be written`, `the order gate
